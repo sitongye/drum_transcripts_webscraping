@@ -21,11 +21,15 @@ def get_and_save_sheet(selenium_cookie, song_page_url, main_output_folder):
     r = s.get(song_page_url)
     soup = BeautifulSoup(r.text, "html.parser")
     # get song title
-    song_title = soup.find("h1", class_="text-black font-bold item-title heading").text
-    artist,album,genre = [i.strip().replace("/","_") for i in soup.find("p", class_="text-grey-3 item-title body mt-1 mb-3").text.strip().replace("-", "").split("\n")]
+    song_title = soup.find("h1", class_="text-black font-bold item-title heading").text.strip().replace("/","_")
+    #song_title = song_title.replace("'", "_")
+    print(song_title)
+    artist,album,genre = [i.strip().replace("/","_") for i in soup.find("p", class_="text-grey-3 item-title body mt-1 mb-3").text.strip().replace("-", "").strip().split("\n")]
     song_url = [i.split('resource_url":"')[-1].replace("\\","") for i in re.findall(str('\"resource_url\":\"https\:.*?\.pdf'), str(soup.find("content-lesson-action-buttons")))][0]
     song_dict = {"name": song_title, "artist": artist, "album": album, "genre": genre, "pdf_url": song_url}
-    output_path = None
+    output_path = os.path.join(main_output_folder, artist, album, "{}.pdf".format(song_title))
+    if os.path.isfile(output_path):
+        return
     if not artist:
         artist = "Unknown Artist"
         print("unknown artist: {}".format(song_url))
@@ -38,40 +42,56 @@ def get_and_save_sheet(selenium_cookie, song_page_url, main_output_folder):
     if not os.path.exists(os.path.join(main_output_folder, artist, album)):
         os.makedirs(os.path.join(main_output_folder, artist, album))
     pdf_response = requests.get(song_url)
-    Path(os.path.join(main_output_folder, artist, album, "{}.pdf".format(song_title))).write_bytes(pdf_response.content)
+    Path(output_path).write_bytes(pdf_response.content)
+    #print(song_dict)
     return song_dict
 
 headers = requests.utils.default_headers()
 headers.update({"User-Agent": "Mozilla/5.0 (X11; CrOS x86_64 13421.89.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.183 Safari/537.36"})
-driver = webdriver.Firefox(executable_path='./geckodriver')
+driver = webdriver.Firefox(executable_path='../geckodriver')
 driver.get('https://www.drumeo.com/members/lessons/songs')
 
 WebDriverWait(driver,timeout=1000).until(lambda a: a.find_element_by_xpath('//*[@id="app"]/div[3]/div[4]/div/div[1]/h1'))
 print("I am in")
 last_height = driver.execute_script("return document.body.scrollHeight")
 song_htmls = {}
-while True:
-    # scroll down to bottom
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-    # add key down
-    driver.find_element_by_tag_name("html").send_keys(Keys.PAGE_DOWN)
-    time.sleep(10)
-    new_height = driver.execute_script("return document.body.scrollHeight;")
-    if new_height == last_height:
-        break
-    last_height = new_height
-html =driver.page_source
-song_soup = BeautifulSoup(html,"html.parser")
-for tag in song_soup.find_all('div', attrs={"class": "flex flex-column"}):
-    for song in tag.find_all("a"):
-        if "subscribe" not in song["href"]:
-            song_htmls[song["href"].split("/")[-1]] = song["href"]
-print(song_htmls)
+GetList = False
+if GetList is True:
+    while True:
+        # scroll down to bottom
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        # add key down
+        driver.find_element_by_tag_name("html").send_keys(Keys.PAGE_DOWN)
+        time.sleep(10)
+        new_height = driver.execute_script("return document.body.scrollHeight;")
+        if new_height == last_height:
+            break
+        last_height = new_height
+    html =driver.page_source
+    song_soup = BeautifulSoup(html,"html.parser")
+    for tag in song_soup.find_all('div', attrs={"class": "flex flex-column"}):
+        for song in tag.find_all("a"):
+            if "subscribe" not in song["href"]:
+                song_htmls[song["href"].split("/")[-1]] = song["href"]
+    print(song_htmls)
+    with open(os.path.join(".", "drumeo_transcripts.json"), 'w') as fp:
+        json.dump(song_htmls, fp)
+
+with open(os.path.join(".", "drumeo_transcripts.json")) as json_file:
+    song_htmls = json.load(json_file)
+
+# the following block get song from retrieved urls
 ck = driver.get_cookies()
+error_urls = []
 for i in song_htmls.values():
     try:
         get_and_save_sheet(selenium_cookie=ck, song_page_url=i, main_output_folder="/home/sitongyewhiplash/PycharmProjects/web_scraping/drumeo_transcripts/outputs")
     except:
         print("error occurs at: ", i)
+        error_urls.append(i)
         continue
+
+with open('error_urls.txt', 'w') as f:
+    for item in error_urls:
+        f.write("%s\n" % item)
 
